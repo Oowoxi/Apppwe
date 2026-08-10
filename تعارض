@@ -1,0 +1,211 @@
+javascript:(function(){
+    // ============================================================
+    // سكربت التعارض - يكشف مكان WebSocket الحقيقي
+    // ============================================================
+    
+    alert('🧪 جاري إنشاء اتصال WebSocket تجريبي للكشف عن التعارض...');
+    
+    // 1. محاولة إنشاء اتصال WebSocket جديد بنفس الرابط
+    const wsUrl = 'wss://www.njd.chat/ws';
+    let testSocket = null;
+    let errorMessages = [];
+    let foundOriginal = null;
+    
+    console.log('🔍 محاولة إنشاء اتصال WebSocket تجريبي...');
+    
+    try {
+        testSocket = new WebSocket(wsUrl);
+        console.log('✅ تم إنشاء اتصال تجريبي:', testSocket);
+    } catch(e) {
+        errorMessages.push('❌ فشل إنشاء الاتصال: ' + e.message);
+    }
+    
+    // 2. البحث عن أي اتصال WebSocket في الذاكرة
+    // (بما أننا أنشأنا اتصالاً جديداً، سيكون هناك اتصالان)
+    
+    let foundSockets = [];
+    
+    // دالة البحث
+    function findSockets(obj, path, depth) {
+        if (depth > 4) return;
+        if (!obj || typeof obj !== 'object') return;
+        if (obj === window) return;
+        
+        // التحقق من WebSocket
+        if (obj.readyState !== undefined && 
+            typeof obj.send === 'function' && 
+            typeof obj.close === 'function') {
+            
+            // التحقق من أنه ليس الاتصال التجريبي الذي أنشأناه
+            if (obj !== testSocket) {
+                foundSockets.push({
+                    path: path,
+                    obj: obj,
+                    readyState: obj.readyState,
+                    url: obj.url || 'غير معروف'
+                });
+            }
+        }
+        
+        // البحث في الخصائص
+        for (let key in obj) {
+            try {
+                const val = obj[key];
+                if (val && typeof val === 'object' && val !== obj) {
+                    findSockets(val, path + '.' + key, depth + 1);
+                }
+            } catch(e) {}
+        }
+    }
+    
+    // البحث في المتغيرات المعروفة
+    const knownVars = [
+        'TH_SOCKET_RECONNECT_CORE',
+        'TH_SOCKET_RECONNECT_CHAT_ADAPTER',
+        'TH_CHAT_RECONNECT_MANAGER_INSTANCE',
+        'TH_SOCKET_TRANSPORTS',
+        'TH_SOCKET_CLIENT_INFO'
+    ];
+    
+    for (let name of knownVars) {
+        try {
+            const val = window[name];
+            if (val && typeof val === 'object') {
+                findSockets(val, name, 0);
+            }
+        } catch(e) {}
+    }
+    
+    // البحث في جميع متغيرات TH_
+    for (let key in window) {
+        if (key.startsWith('TH_') && typeof window[key] === 'object') {
+            try {
+                findSockets(window[key], key, 0);
+            } catch(e) {}
+        }
+    }
+    
+    // البحث المباشر
+    const direct = ['socket', 'ws', '_socket', '_ws', 'connection', 'webSocket'];
+    for (let name of direct) {
+        try {
+            const val = window[name];
+            if (val && typeof val === 'object' && val.readyState !== undefined) {
+                if (val !== testSocket) {
+                    foundSockets.push({
+                        path: `window.${name}`,
+                        obj: val,
+                        readyState: val.readyState,
+                        url: val.url || 'غير معروف'
+                    });
+                }
+            }
+        } catch(e) {}
+    }
+    
+    // ============================================================
+    // عرض النتائج
+    // ============================================================
+    
+    console.log('═══════════════════════════════════════');
+    console.log('🔍 نتائج البحث بعد إنشاء الاتصال التجريبي:');
+    console.log('═══════════════════════════════════════');
+    
+    let resultMessage = '🔍 تقرير التعارض:\n═══════════════════════\n\n';
+    
+    if (foundSockets.length === 0) {
+        resultMessage += '❌ لم يتم العثور على أي اتصال WebSocket آخر.\n';
+        resultMessage += '💡 الاتصال التجريبي هو الوحيد الموجود.\n';
+        resultMessage += '💡 الموقع قد يستخدم تقنية مختلفة (مثل Socket.IO أو Polling).\n';
+    } else {
+        resultMessage += `✅ تم العثور على ${foundSockets.length} اتصال(ات) WebSocket:\n\n`;
+        
+        foundSockets.forEach((s, i) => {
+            const status = s.readyState === 1 ? '✅ مفتوح' : 
+                           s.readyState === 0 ? '⏳ متصل' : 
+                           s.readyState === 2 ? '🔄 يغلق' : '❌ مغلق';
+            
+            resultMessage += `📌 ${i+1}. المسار: ${s.path}\n`;
+            resultMessage += `   الحالة: ${status}\n`;
+            resultMessage += `   الرابط: ${s.url}\n\n`;
+            
+            console.log(`📌 ${i+1}. ${s.path}: ${status} - ${s.url}`);
+            console.log('   الكائن:', s.obj);
+        });
+        
+        // استخراج الاتصال المفتوح
+        const openSocket = foundSockets.find(s => s.readyState === 1);
+        if (openSocket) {
+            resultMessage += '═══════════════════════════════════════\n';
+            resultMessage += '✅ تم العثور على اتصال مفتوح!\n';
+            resultMessage += `📌 المسار: ${openSocket.path}\n`;
+            resultMessage += '💡 استخدم هذا الأمر:\n';
+            resultMessage += `window._njd_socket = window.${openSocket.path.split('.')[0]};\n`;
+            resultMessage += 'window.socket = window._njd_socket;\n';
+            
+            // حفظه تلقائياً
+            try {
+                const parts = openSocket.path.split('.');
+                let obj = window;
+                for (let p of parts) {
+                    obj = obj[p];
+                }
+                window._njd_socket = obj;
+                window.socket = obj;
+                resultMessage += '\n✅ تم حفظ الاتصال تلقائياً في window.socket';
+            } catch(e) {
+                resultMessage += '\n⚠️ تعذر حفظ الاتصال تلقائياً. استخدم الأمر اليدوي.';
+            }
+        }
+    }
+    
+    // إغلاق الاتصال التجريبي
+    if (testSocket && testSocket.readyState === 1) {
+        testSocket.close();
+        resultMessage += '\n\n🔌 تم إغلاق الاتصال التجريبي.';
+    }
+    
+    console.log('═══════════════════════════════════════');
+    console.log(resultMessage);
+    
+    // عرض النتيجة في نافذة
+    const win = window.open('', '_blank', 'width=600,height=500,scrollbars=yes');
+    if (win) {
+        win.document.write(`
+            <!DOCTYPE html>
+            <html dir="rtl">
+            <head>
+                <meta charset="UTF-8">
+                <title>تقرير التعارض - WebSocket</title>
+                <style>
+                    body { font-family: 'Tahoma', Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+                    .container { max-width: 700px; margin: 0 auto; background: #16213e; padding: 20px; border-radius: 12px; }
+                    h1 { color: #e94560; font-size: 20px; }
+                    pre { background: #0f0f1a; padding: 15px; border-radius: 8px; overflow: auto; white-space: pre-wrap; font-size: 13px; color: #a0a0b0; border: 1px solid #2d3436; }
+                    .copy-btn { width: 100%; padding: 10px; background: #e94560; color: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; }
+                    .copy-btn:hover { background: #c0392b; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🔍 تقرير التعارض - WebSocket</h1>
+                    <pre id="report">${resultMessage}</pre>
+                    <button class="copy-btn" onclick="copyReport()">📋 نسخ التقرير</button>
+                    <script>
+                        function copyReport() {
+                            const text = document.getElementById('report').innerText;
+                            navigator.clipboard.writeText(text).then(() => alert('✅ تم النسخ!'));
+                        }
+                    <\/script>
+                </div>
+            </body>
+            </html>
+        `);
+        win.document.close();
+    } else {
+        alert(resultMessage);
+    }
+    
+    alert('🧪 تم إجراء اختبار التعارض!\nافتح النافذة المنبثقة لمشاهدة النتائج.');
+    
+})();
