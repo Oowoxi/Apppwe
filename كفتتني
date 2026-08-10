@@ -1,0 +1,296 @@
+javascript:(function(){
+    // ============================================================
+    // سكربت الشبح - النسخة المعدلة لشات نجد
+    // ============================================================
+    
+    console.log('🧪 جاري البحث عن اتصال WebSocket...');
+    
+    // ============================================================
+    // البحث عن الاتصال بكل الطرق
+    // ============================================================
+    
+    let socket = null;
+    let foundBy = 'غير معروف';
+    let candidates = [];
+    
+    // القائمة الكاملة للمتغيرات المحتملة
+    const possibleNames = [
+        'socket', 'ws', '_socket', '_ws', 
+        'connection', 'webSocket', 'websocket',
+        'chatSocket', 'roomSocket', 'mainSocket',
+        'TH_socket', 'thSocket', 'socketIO',
+        'SOCKET', 'WS', 'Socket',
+        'njdSocket', 'njd_socket', 'chatWS',
+        '_njd_socket' // من السكربت التشخيصي
+    ];
+    
+    // البحث المباشر
+    for (let name of possibleNames) {
+        try {
+            const val = window[name];
+            if (val && typeof val === 'object' && 
+                val.readyState === 1 && 
+                val.send && typeof val.send === 'function') {
+                socket = val;
+                foundBy = `window.${name}`;
+                break;
+            }
+        } catch(e) {}
+    }
+    
+    // البحث العميق في window
+    if (!socket) {
+        for (let key in window) {
+            try {
+                const val = window[key];
+                if (val && typeof val === 'object' && 
+                    val.readyState === 1 && 
+                    val.send && typeof val.send === 'function') {
+                    socket = val;
+                    foundBy = `window.${key}`;
+                    break;
+                }
+                
+                // مستوى أعمق
+                if (typeof val === 'object' && !val.nodeType) {
+                    for (let subKey in val) {
+                        try {
+                            const subVal = val[subKey];
+                            if (subVal && typeof subVal === 'object' &&
+                                subVal.readyState === 1 &&
+                                subVal.send && typeof subVal.send === 'function') {
+                                socket = subVal;
+                                foundBy = `window.${key}.${subKey}`;
+                                break;
+                            }
+                        } catch(e) {}
+                    }
+                    if (socket) break;
+                }
+            } catch(e) {}
+        }
+    }
+    
+    if (!socket) {
+        console.error('❌ لم يتم العثور على اتصال!');
+        alert('❌ لم يتم العثور على اتصال WebSocket!\n\n' +
+              'جرب السكربت التشخيصي أولاً:\n' +
+              '1. افتح Console (F12)\n' +
+              '2. الصق سكربت البحث التشخيصي\n' +
+              '3. ستظهر لك اسم المتغير الصحيح');
+        return;
+    }
+    
+    console.log(`✅ تم العثور على الاتصال عبر: ${foundBy}`);
+    
+    // ============================================================
+    // بقية السكربت (نفس الكود السابق)
+    // ============================================================
+    
+    const originalSend = socket.send.bind(socket);
+    let isGhostMode = false;
+    let currentRoomId = null;
+    let messageLog = [];
+    let messageCount = 0;
+    
+    // إنشاء واجهة التحكم
+    const oldPanel = document.getElementById('ghost-panel-njd');
+    if (oldPanel) oldPanel.remove();
+    
+    const panel = document.createElement('div');
+    panel.id = 'ghost-panel-njd';
+    panel.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 999999;
+        background: #1a1a2e;
+        color: #fff;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 0 30px rgba(0,0,0,0.9);
+        font-family: Arial, sans-serif;
+        min-width: 230px;
+        border: 2px solid #e94560;
+        direction: rtl;
+        font-size: 13px;
+    `;
+    
+    panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="color:#e94560;font-weight:bold;">👻 اختبار الشبح</span>
+            <span id="g-status" style="background:#ff6b6b;padding:2px 10px;border-radius:20px;font-size:11px;">غير مفعل</span>
+        </div>
+        <div style="font-size:11px;color:#a0a0b0;margin-bottom:8px;">
+            <div>📍 الغرفة: <span id="g-room" style="color:#fff;">-</span></div>
+            <div>📩 الرسائل: <span id="g-msgs" style="color:#fff;">0</span></div>
+            <div>🔌 الاتصال: <span id="g-socket" style="color:#00b894;font-size:9px;">${foundBy}</span></div>
+        </div>
+        <button id="g-activate" style="width:100%;padding:8px;background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-bottom:4px;font-size:13px;">
+            🚀 تفعيل الشبح
+        </button>
+        <button id="g-show" style="width:100%;padding:8px;background:#00b894;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-bottom:4px;font-size:13px;">
+            📩 عرض الرسائل (0)
+        </button>
+        <button id="g-reset" style="width:100%;padding:8px;background:#6c5ce7;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">
+            🔄 إعادة تحميل
+        </button>
+        <div id="g-msg-list" style="margin-top:8px;max-height:120px;overflow-y:auto;background:#0f0f1a;padding:5px;border-radius:6px;font-size:11px;display:none;direction:ltr;text-align:left;"></div>
+        <div style="margin-top:6px;font-size:10px;color:#666;text-align:center;">للاختبار على موقعك فقط</div>
+    `;
+    
+    document.body.appendChild(panel);
+    
+    function updateMsgCount() {
+        document.getElementById('g-msgs').textContent = messageCount;
+        document.querySelector('#g-show').textContent = `📩 عرض الرسائل (${messageCount})`;
+    }
+    
+    document.getElementById('g-activate').onclick = function() {
+        if (isGhostMode) {
+            alert('⚠️ وضع الشبح مفعل بالفعل!');
+            return;
+        }
+        
+        console.log('🔄 جاري تفعيل وضع الشبح...');
+        
+        socket.send = function(data) {
+            try {
+                let parsed;
+                let isString = typeof data === 'string';
+                
+                if (isString) {
+                    try {
+                        parsed = JSON.parse(data);
+                    } catch(e) {
+                        return originalSend(data);
+                    }
+                } else {
+                    return originalSend(data);
+                }
+                
+                const isLeave = 
+                    parsed.action === 'leave_room' ||
+                    parsed.type === 'leave' ||
+                    parsed.cmd === 'leave' ||
+                    parsed.event === 'leave_room' ||
+                    parsed.act === 'leave' ||
+                    (isString && data.includes('"action":"leave"')) ||
+                    (isString && data.includes('leave_room'));
+                
+                if (isLeave) {
+                    console.log('🛑 تم اعتراض طلب الخروج!');
+                    currentRoomId = parsed.room_id || parsed.room || 'unknown';
+                    document.getElementById('g-room').textContent = currentRoomId;
+                    
+                    const fakeUpdate = {
+                        type: 'status_update',
+                        status: 'invisible',
+                        room_id: currentRoomId,
+                        _test: true
+                    };
+                    
+                    console.log('📤 إرسال تحديث وهمي:', fakeUpdate);
+                    originalSend(JSON.stringify(fakeUpdate));
+                    
+                    isGhostMode = true;
+                    document.getElementById('g-status').textContent = '👻 نشط';
+                    document.getElementById('g-status').style.background = '#00b894';
+                    
+                    const origOnMsg = socket.onmessage;
+                    socket.onmessage = function(event) {
+                        try {
+                            const rawData = event.data;
+                            let data;
+                            
+                            if (typeof rawData === 'string') {
+                                try {
+                                    data = JSON.parse(rawData);
+                                } catch(e) {
+                                    return origOnMsg ? origOnMsg.call(socket, event) : null;
+                                }
+                            } else {
+                                return origOnMsg ? origOnMsg.call(socket, event) : null;
+                            }
+                            
+                            if (data.msg || data.message) {
+                                const msg = data.msg || data.message || '';
+                                const user = data.user || data.username || 'مجهول';
+                                
+                                messageCount++;
+                                updateMsgCount();
+                                
+                                const time = new Date().toLocaleTimeString();
+                                messageLog.push({ user, msg, time });
+                                
+                                console.log(`📩 [${time}] ${user}: ${msg.substring(0, 60)}`);
+                                
+                                const list = document.getElementById('g-msg-list');
+                                if (list.style.display === 'block') {
+                                    updateMessageList();
+                                }
+                            }
+                            
+                            if (origOnMsg) {
+                                origOnMsg.call(socket, event);
+                            }
+                        } catch(e) {
+                            if (origOnMsg) {
+                                origOnMsg.call(socket, event);
+                            }
+                        }
+                    };
+                    
+                    console.log('✅ وضع الشبح مفعل!');
+                    alert('✅ تم تفعيل وضع الشبح!\nأنت الآن في الغرفة ولكن غير مرئي.');
+                    return;
+                }
+                
+                if (isGhostMode) {
+                    console.log('🔇 منع الإرسال (وضع الشبح)');
+                    return;
+                }
+                
+                originalSend(data);
+            } catch(e) {
+                originalSend(data);
+            }
+        };
+        
+        alert('🧪 تم التفعيل! اضغط على زر "الخروج من الغرفة" الآن.');
+    };
+    
+    function updateMessageList() {
+        const list = document.getElementById('g-msg-list');
+        if (messageLog.length === 0) {
+            list.innerHTML = '<div style="color:#666;padding:5px;">لا توجد رسائل مسجلة</div>';
+        } else {
+            list.innerHTML = messageLog.slice(-20).map(m => 
+                `<div style="padding:3px 0;border-bottom:1px solid #2d3436;font-size:11px;">
+                    <span style="color:#666;">${m.time}</span>
+                    <span style="color:#e94560;">${m.user}:</span>
+                    <span style="color:#fff;">${m.msg}</span>
+                </div>`
+            ).join('');
+            list.scrollTop = list.scrollHeight;
+        }
+    }
+    
+    document.getElementById('g-show').onclick = function() {
+        const list = document.getElementById('g-msg-list');
+        if (list.style.display === 'block') {
+            list.style.display = 'none';
+            return;
+        }
+        list.style.display = 'block';
+        updateMessageList();
+    };
+    
+    document.getElementById('g-reset').onclick = function() {
+        location.reload();
+    };
+    
+    console.log('✅ السكربت جاهز!');
+    console.log('💡 اضغط "تفعيل الشبح" ثم "الخروج من الغرفة"');
+    
+})();
