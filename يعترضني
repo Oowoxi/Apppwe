@@ -1,0 +1,243 @@
+javascript:(function(){
+    // ============================================================
+    // سكربت الشبح - لشات نجد (يعمل مع Socket.IO)
+    // ============================================================
+    
+    // 1. العثور على الاتصال
+    let socket = window.x_x || window._njd_io || null;
+    
+    if (!socket) {
+        alert('❌ لم يتم العثور على الاتصال!\nتأكد من أنك داخل الغرفة.');
+        return;
+    }
+    
+    console.log('✅ تم العثور على الاتصال:', socket);
+    alert('✅ تم العثور على اتصال Socket.IO!\nالمعرف: ' + (socket.id || 'غير معروف'));
+    
+    // 2. حفظ الدوال الأصلية
+    const originalEmit = socket.emit.bind(socket);
+    const originalOn = socket.on.bind(socket);
+    
+    let isGhostMode = false;
+    let currentRoomId = null;
+    let messageLog = [];
+    let messageCount = 0;
+    
+    // 3. إنشاء واجهة التحكم
+    const oldPanel = document.getElementById('ghost-panel-final');
+    if (oldPanel) oldPanel.remove();
+    
+    const panel = document.createElement('div');
+    panel.id = 'ghost-panel-final';
+    panel.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 999999;
+        background: #1a1a2e;
+        color: #fff;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 0 30px rgba(0,0,0,0.9);
+        font-family: Arial, sans-serif;
+        min-width: 220px;
+        border: 2px solid #00b894;
+        direction: rtl;
+        font-size: 13px;
+    `;
+    
+    panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="color:#00b894;font-weight:bold;">👻 وضع الشبح</span>
+            <span id="g-status" style="background:#ff6b6b;padding:2px 10px;border-radius:20px;font-size:11px;">غير مفعل</span>
+        </div>
+        <div style="font-size:11px;color:#a0a0b0;margin-bottom:8px;">
+            <div>📍 الغرفة: <span id="g-room" style="color:#fff;">-</span></div>
+            <div>📩 الرسائل: <span id="g-msgs" style="color:#fff;">0</span></div>
+            <div>🔌 المعرف: <span id="g-id" style="color:#00b894;font-size:9px;">${socket.id || 'غير معروف'}</span></div>
+        </div>
+        <button id="g-activate" style="width:100%;padding:8px;background:#00b894;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-bottom:4px;font-size:13px;">
+            🚀 تفعيل الشبح
+        </button>
+        <button id="g-show" style="width:100%;padding:8px;background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-bottom:4px;font-size:13px;">
+            📩 عرض الرسائل (0)
+        </button>
+        <button id="g-reset" style="width:100%;padding:8px;background:#6c5ce7;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">
+            🔄 إعادة تحميل
+        </button>
+        <div id="g-msg-list" style="margin-top:8px;max-height:120px;overflow-y:auto;background:#0f0f1a;padding:5px;border-radius:6px;font-size:11px;display:none;direction:ltr;text-align:left;"></div>
+        <div style="margin-top:6px;font-size:9px;color:#555;text-align:center;">✅ يعمل مع Socket.IO</div>
+    `;
+    
+    document.body.appendChild(panel);
+    
+    // 4. وظائف التحديث
+    function updateMsgCount() {
+        document.getElementById('g-msgs').textContent = messageCount;
+        document.querySelector('#g-show').textContent = `📩 عرض الرسائل (${messageCount})`;
+    }
+    
+    function updateMessageList() {
+        const list = document.getElementById('g-msg-list');
+        if (messageLog.length === 0) {
+            list.innerHTML = '<div style="color:#666;padding:5px;">لا توجد رسائل</div>';
+        } else {
+            list.innerHTML = messageLog.slice(-20).map(m => 
+                `<div style="padding:3px 0;border-bottom:1px solid #2d3436;font-size:11px;">
+                    <span style="color:#666;">${m.time}</span>
+                    <span style="color:#00b894;">${m.user}:</span>
+                    <span style="color:#fff;">${m.msg}</span>
+                </div>`
+            ).join('');
+            list.scrollTop = list.scrollHeight;
+        }
+    }
+    
+    // 5. وظيفة تفعيل الشبح
+    document.getElementById('g-activate').onclick = function() {
+        if (isGhostMode) {
+            alert('⚠️ وضع الشبح مفعل بالفعل!');
+            return;
+        }
+        
+        console.log('🔄 جاري تفعيل وضع الشبح...');
+        
+        // اعتراض دالة emit (الإرسال)
+        socket.emit = function(event, data) {
+            console.log('📤 محاولة إرسال:', event, data);
+            
+            // الكشف عن حدث الخروج
+            if (event === 'leave_room' || 
+                event === 'leave' || 
+                event === 'exit_room' ||
+                (typeof event === 'string' && event.includes('leave'))) {
+                
+                console.log('🛑 تم اعتراض حدث الخروج!');
+                currentRoomId = data?.room_id || data?.room || data || 'unknown';
+                document.getElementById('g-room').textContent = currentRoomId;
+                
+                // إرسال تحديث حالة وهمي بدلاً من الخروج
+                const fakeUpdate = {
+                    type: 'status_update',
+                    status: 'invisible',
+                    room_id: currentRoomId,
+                    _test: true,
+                    _timestamp: Date.now()
+                };
+                
+                console.log('📤 إرسال تحديث وهمي:', fakeUpdate);
+                originalEmit('status_update', fakeUpdate);
+                
+                isGhostMode = true;
+                document.getElementById('g-status').textContent = '👻 نشط';
+                document.getElementById('g-status').style.background = '#00b894';
+                
+                // بدء الاستماع للرسائل (بدون إرسال أي شيء)
+                // نستخدم المستمعات الموجودة ولكن نضيف مستمعاً خاصاً بنا
+                const originalOnMessage = socket._callbacks?.['$'] || null;
+                
+                // إضافة مستمع للرسائل الجديدة
+                socket.on('new_message', function(data) {
+                    if (data && data.msg) {
+                        messageCount++;
+                        updateMsgCount();
+                        messageLog.push({
+                            user: data.user || data.username || 'مجهول',
+                            msg: data.msg || data.message || '',
+                            time: new Date().toLocaleTimeString()
+                        });
+                        console.log(`📩 رسالة جديدة:`, data);
+                        const list = document.getElementById('g-msg-list');
+                        if (list.style.display === 'block') {
+                            updateMessageList();
+                        }
+                    }
+                });
+                
+                // مستمع للرسائل العامة
+                socket.on('chat_message', function(data) {
+                    if (data && data.msg) {
+                        messageCount++;
+                        updateMsgCount();
+                        messageLog.push({
+                            user: data.user || data.username || 'مجهول',
+                            msg: data.msg || data.message || '',
+                            time: new Date().toLocaleTimeString()
+                        });
+                        console.log(`📩 رسالة دردشة:`, data);
+                        const list = document.getElementById('g-msg-list');
+                        if (list.style.display === 'block') {
+                            updateMessageList();
+                        }
+                    }
+                });
+                
+                // مستمع لجميع الرسائل (كحل احتياطي)
+                socket.onAny(function(event, data) {
+                    if (event === 'message' || event === 'msg' || event === 'chat') {
+                        if (data && (data.msg || data.message)) {
+                            messageCount++;
+                            updateMsgCount();
+                            messageLog.push({
+                                user: data.user || data.username || 'مجهول',
+                                msg: data.msg || data.message || '',
+                                time: new Date().toLocaleTimeString()
+                            });
+                            console.log(`📩 رسالة (${event}):`, data);
+                            const list = document.getElementById('g-msg-list');
+                            if (list.style.display === 'block') {
+                                updateMessageList();
+                            }
+                        }
+                    }
+                });
+                
+                console.log('✅ وضع الشبح مفعل!');
+                alert('✅ تم تفعيل وضع الشبح!\nأنت الآن في الغرفة ولكن غير مرئي.');
+                return;
+            }
+            
+            // في وضع الشبح، نمنع إرسال أي شيء
+            if (isGhostMode) {
+                console.log('🔇 منع الإرسال (وضع الشبح):', event);
+                return;
+            }
+            
+            // إرسال الباقي بشكل طبيعي
+            originalEmit(event, data);
+        };
+        
+        alert('🧪 تم التفعيل! اضغط على زر "الخروج من الغرفة" الآن.');
+    };
+    
+    // 6. عرض الرسائل
+    document.getElementById('g-show').onclick = function() {
+        const list = document.getElementById('g-msg-list');
+        if (list.style.display === 'block') {
+            list.style.display = 'none';
+            return;
+        }
+        list.style.display = 'block';
+        updateMessageList();
+    };
+    
+    // 7. إعادة تحميل
+    document.getElementById('g-reset').onclick = function() {
+        location.reload();
+    };
+    
+    // 8. عرض معلومات في Console
+    console.log('═══════════════════════════════════════');
+    console.log('✅ سكربت الشبح جاهز!');
+    console.log('📌 الاتصال: window.x_x');
+    console.log(`🆔 المعرف: ${socket.id || 'غير معروف'}`);
+    console.log('📌 التعليمات:');
+    console.log('  1. اضغط "تفعيل الشبح"');
+    console.log('  2. اضغط على زر "الخروج من الغرفة"');
+    console.log('  3. ستتحول إلى وضع الشبح (غير مرئي)');
+    console.log('  4. ستستمر في رؤية الرسائل');
+    console.log('═══════════════════════════════════════');
+    
+    alert('✅ تم تحميل سكربت الشبح!\nالاتصال: window.x_x\nاضغط "تفعيل الشبح" ثم "الخروج".');
+    
+})();
