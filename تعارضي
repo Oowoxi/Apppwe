@@ -1,0 +1,224 @@
+javascript:(function(){
+    // ============================================================
+    // سكربت كشف Socket.IO - لشات نجد
+    // ============================================================
+    
+    alert('🧪 جاري البحث عن اتصال Socket.IO...');
+    
+    let foundIO = null;
+    let foundBy = 'غير معروف';
+    let results = [];
+    
+    // 1. البحث عن Socket.IO في المتغيرات المعروفة
+    const ioVars = [
+        'io', 'socketIO', 'socketio', 'SocketIO',
+        'TH_socketIO', 'TH_io', '_io',
+        'manager', 'socketManager', 'connectionManager'
+    ];
+    
+    for (let name of ioVars) {
+        try {
+            const val = window[name];
+            if (val && typeof val === 'object') {
+                // التحقق من وجود دوال Socket.IO
+                if (typeof val.emit === 'function' || 
+                    typeof val.on === 'function' ||
+                    typeof val.connect === 'function') {
+                    results.push({
+                        path: `window.${name}`,
+                        obj: val,
+                        type: 'Socket.IO كائن'
+                    });
+                    foundIO = val;
+                    foundBy = `window.${name}`;
+                    break;
+                }
+            }
+        } catch(e) {}
+    }
+    
+    // 2. البحث في TH_SOCKET_RECONNECT_CORE (قد يحتوي على Socket.IO)
+    if (window.TH_SOCKET_RECONNECT_CORE) {
+        const core = window.TH_SOCKET_RECONNECT_CORE;
+        for (let key in core) {
+            try {
+                const val = core[key];
+                if (val && typeof val === 'object') {
+                    if (typeof val.emit === 'function' || 
+                        typeof val.on === 'function') {
+                        results.push({
+                            path: `TH_SOCKET_RECONNECT_CORE.${key}`,
+                            obj: val,
+                            type: 'Socket.IO (داخل Reconnect)'
+                        });
+                        foundIO = val;
+                        foundBy = `TH_SOCKET_RECONNECT_CORE.${key}`;
+                        break;
+                    }
+                }
+            } catch(e) {}
+        }
+    }
+    
+    // 3. البحث في TH_SOCKET_RECONNECT_CHAT_ADAPTER
+    if (window.TH_SOCKET_RECONNECT_CHAT_ADAPTER) {
+        const adapter = window.TH_SOCKET_RECONNECT_CHAT_ADAPTER;
+        for (let key in adapter) {
+            try {
+                const val = adapter[key];
+                if (val && typeof val === 'object') {
+                    if (typeof val.emit === 'function' || 
+                        typeof val.on === 'function') {
+                        results.push({
+                            path: `TH_SOCKET_RECONNECT_CHAT_ADAPTER.${key}`,
+                            obj: val,
+                            type: 'Socket.IO (داخل Adapter)'
+                        });
+                        foundIO = val;
+                        foundBy = `TH_SOCKET_RECONNECT_CHAT_ADAPTER.${key}`;
+                        break;
+                    }
+                }
+            } catch(e) {}
+        }
+    }
+    
+    // 4. البحث في TH_CHAT_RECONNECT_MANAGER_INSTANCE
+    if (window.TH_CHAT_RECONNECT_MANAGER_INSTANCE) {
+        const manager = window.TH_CHAT_RECONNECT_MANAGER_INSTANCE;
+        for (let key in manager) {
+            try {
+                const val = manager[key];
+                if (val && typeof val === 'object') {
+                    if (typeof val.emit === 'function' || 
+                        typeof val.on === 'function') {
+                        results.push({
+                            path: `TH_CHAT_RECONNECT_MANAGER_INSTANCE.${key}`,
+                            obj: val,
+                            type: 'Socket.IO (داخل Manager)'
+                        });
+                        foundIO = val;
+                        foundBy = `TH_CHAT_RECONNECT_MANAGER_INSTANCE.${key}`;
+                        break;
+                    }
+                }
+            } catch(e) {}
+        }
+    }
+    
+    // 5. البحث عن أي كائن يحتوي على emit و on
+    for (let key in window) {
+        try {
+            const val = window[key];
+            if (val && typeof val === 'object' && 
+                typeof val.emit === 'function' && 
+                typeof val.on === 'function') {
+                results.push({
+                    path: `window.${key}`,
+                    obj: val,
+                    type: 'Socket.IO (مباشر)'
+                });
+                if (!foundIO) {
+                    foundIO = val;
+                    foundBy = `window.${key}`;
+                }
+            }
+        } catch(e) {}
+    }
+    
+    // ============================================================
+    // عرض النتائج
+    // ============================================================
+    
+    let report = '═══════════════════════════════════════\n';
+    report += '🔍 تقرير كشف Socket.IO\n';
+    report += `📅 الوقت: ${new Date().toLocaleString('ar-SA')}\n`;
+    report += '═══════════════════════════════════════\n\n';
+    
+    if (results.length === 0) {
+        report += '❌ لم يتم العثور على أي اتصال Socket.IO!\n\n';
+        report += '💡 الاحتمالات:\n';
+        report += '  1. الموقع يستخدم Long Polling (استطلاع طويل)\n';
+        report += '  2. الموقع يستخدم Server-Sent Events (SSE)\n';
+        report += '  3. الاتصال مخفي بشكل أعمق\n';
+    } else {
+        report += `✅ تم العثور على ${results.length} كائن(ات) Socket.IO:\n\n`;
+        results.forEach((r, i) => {
+            report += `📌 ${i+1}. المسار: ${r.path}\n`;
+            report += `   النوع: ${r.type}\n`;
+            // محاولة استخراج بعض المعلومات
+            try {
+                if (r.obj.id) report += `   المعرف: ${r.obj.id}\n`;
+                if (r.obj.nsp) report += `   Namespace: ${r.obj.nsp}\n`;
+                if (r.obj.io) report += `   IO: موجود\n`;
+            } catch(e) {}
+            report += '\n';
+        });
+        
+        if (foundIO) {
+            report += '═══════════════════════════════════════\n';
+            report += '✅ تم العثور على اتصال Socket.IO!\n';
+            report += `📌 المسار: ${foundBy}\n`;
+            report += '💡 استخدم هذا الأمر:\n';
+            report += `window._njd_io = window.${foundBy.split('.')[0]};\n`;
+            report += 'window.socket = window._njd_io;\n\n';
+            
+            // حفظه تلقائياً
+            try {
+                const parts = foundBy.split('.');
+                let obj = window;
+                for (let p of parts) {
+                    obj = obj[p];
+                }
+                window._njd_io = obj;
+                window.socket = obj;
+                report += '✅ تم حفظ الاتصال تلقائياً في window.socket';
+            } catch(e) {
+                report += '⚠️ تعذر حفظ الاتصال تلقائياً. استخدم الأمر اليدوي.';
+            }
+        }
+    }
+    
+    console.log(report);
+    
+    // عرض النتيجة
+    const win = window.open('', '_blank', 'width=600,height=500,scrollbars=yes');
+    if (win) {
+        win.document.write(`
+            <!DOCTYPE html>
+            <html dir="rtl">
+            <head>
+                <meta charset="UTF-8">
+                <title>تقرير كشف Socket.IO</title>
+                <style>
+                    body { font-family: 'Tahoma', Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+                    .container { max-width: 700px; margin: 0 auto; background: #16213e; padding: 20px; border-radius: 12px; }
+                    h1 { color: #e94560; font-size: 20px; }
+                    pre { background: #0f0f1a; padding: 15px; border-radius: 8px; overflow: auto; white-space: pre-wrap; font-size: 13px; color: #a0a0b0; border: 1px solid #2d3436; max-height: 400px; overflow-y: auto; }
+                    .copy-btn { width: 100%; padding: 10px; background: #e94560; color: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; }
+                    .copy-btn:hover { background: #c0392b; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🔍 تقرير كشف Socket.IO</h1>
+                    <pre id="report">${report}</pre>
+                    <button class="copy-btn" onclick="copyReport()">📋 نسخ التقرير</button>
+                    <script>
+                        function copyReport() {
+                            const text = document.getElementById('report').innerText;
+                            navigator.clipboard.writeText(text).then(() => alert('✅ تم النسخ!'));
+                        }
+                    <\/script>
+                </div>
+            </body>
+            </html>
+        `);
+        win.document.close();
+    } else {
+        alert(report);
+    }
+    
+    alert('🧪 تم البحث عن Socket.IO!\nافتح النافذة لمشاهدة النتائج.');
+    
+})();
