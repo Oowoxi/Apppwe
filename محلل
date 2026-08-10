@@ -1,0 +1,261 @@
+javascript:(function(){
+    // ============================================================
+    // سكربت التحليل الشامل لاتصال WebSocket في شات نجد
+    // ============================================================
+    
+    console.log('🔍 بدء التحليل الشامل...');
+    
+    // ============================================================
+    // 1. البحث عن جميع اتصالات WebSocket الممكنة
+    // ============================================================
+    
+    let report = [];
+    let foundSockets = [];
+    let allCandidates = [];
+    
+    // دالة للبحث العميق في الكائنات
+    function deepSearch(obj, path, depth) {
+        if (depth > 4) return; // تجنب التكرار العميق
+        if (!obj || typeof obj !== 'object') return;
+        if (obj === window || obj === document) return;
+        
+        // التحقق من خصائص WebSocket
+        if (obj.readyState !== undefined && 
+            typeof obj.send === 'function' && 
+            typeof obj.close === 'function') {
+            allCandidates.push({
+                path: path,
+                obj: obj,
+                readyState: obj.readyState,
+                url: obj.url || 'غير معروف',
+                protocol: obj.protocol || 'غير معروف',
+                extensions: obj.extensions || 'غير معروف',
+                bufferedAmount: obj.bufferedAmount || 0,
+                binaryType: obj.binaryType || 'غير معروف',
+                onmessage: typeof obj.onmessage === 'function' ? 'محدد' : 'غير محدد',
+                onclose: typeof obj.onclose === 'function' ? 'محدد' : 'غير محدد',
+                onerror: typeof obj.onerror === 'function' ? 'محدد' : 'غير محدد',
+                onopen: typeof obj.onopen === 'function' ? 'محدد' : 'غير محدد'
+            });
+        }
+        
+        // البحث داخل خصائص الكائن
+        for (let key in obj) {
+            try {
+                const val = obj[key];
+                if (val && typeof val === 'object' && val !== obj) {
+                    deepSearch(val, path + '.' + key, depth + 1);
+                }
+            } catch(e) {}
+        }
+    }
+    
+    // البحث في window
+    deepSearch(window, 'window', 0);
+    
+    // البحث المباشر في المتغيرات الشائعة
+    const commonNames = [
+        'socket', 'ws', '_socket', '_ws', 'connection', 'webSocket', 
+        'websocket', 'chatSocket', 'roomSocket', 'mainSocket',
+        'TH_socket', 'thSocket', 'socketIO', 'SOCKET', 'WS',
+        'njdSocket', 'njd_socket', 'chatWS', '_njd_socket'
+    ];
+    
+    for (let name of commonNames) {
+        try {
+            const val = window[name];
+            if (val && typeof val === 'object' && val.readyState !== undefined) {
+                // أضفه إذا لم يكن موجوداً بالفعل
+                const exists = allCandidates.some(c => c.obj === val);
+                if (!exists) {
+                    allCandidates.push({
+                        path: `window.${name}`,
+                        obj: val,
+                        readyState: val.readyState,
+                        url: val.url || 'غير معروف',
+                        protocol: val.protocol || 'غير معروف',
+                        extensions: val.extensions || 'غير معروف',
+                        bufferedAmount: val.bufferedAmount || 0,
+                        binaryType: val.binaryType || 'غير معروف',
+                        onmessage: typeof val.onmessage === 'function' ? 'محدد' : 'غير محدد',
+                        onclose: typeof val.onclose === 'function' ? 'محدد' : 'غير محدد',
+                        onerror: typeof val.onerror === 'function' ? 'محدد' : 'غير محدد',
+                        onopen: typeof val.onopen === 'function' ? 'محدد' : 'غير محدد'
+                    });
+                }
+            }
+        } catch(e) {}
+    }
+    
+    // تصفية المكررات حسب الكائن نفسه
+    const unique = [];
+    const seen = new Set();
+    for (let c of allCandidates) {
+        if (!seen.has(c.obj)) {
+            seen.add(c.obj);
+            unique.push(c);
+        }
+    }
+    
+    // ============================================================
+    // 2. بناء التقرير
+    // ============================================================
+    
+    const now = new Date();
+    const timestamp = now.toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' });
+    
+    let reportText = `═══════════════════════════════════════\n`;
+    reportText += `📋 تقرير تحليل اتصال WebSocket\n`;
+    reportText += `📅 التاريخ والوقت: ${timestamp}\n`;
+    reportText += `🌐 URL: ${window.location.href}\n`;
+    reportText += `═══════════════════════════════════════\n\n`;
+    
+    if (unique.length === 0) {
+        reportText += `❌ لم يتم العثور على أي اتصال WebSocket!\n`;
+        reportText += `💡 تأكد من أنك داخل غرفة الدردشة.\n`;
+        reportText += `💡 إذا كنت داخل الغرفة، قد يكون الاتصال مخفياً في إغلاق (closure) لا يمكن الوصول إليه.\n`;
+    } else {
+        reportText += `✅ تم العثور على ${unique.length} اتصال(ات) WebSocket:\n\n`;
+        
+        unique.forEach((c, i) => {
+            const statusMap = {
+                0: '⏳ CONNECTING (متصل)',
+                1: '✅ OPEN (مفتوح)',
+                2: '🔄 CLOSING (يغلق)',
+                3: '❌ CLOSED (مغلق)'
+            };
+            const status = statusMap[c.readyState] || `غير معروف (${c.readyState})`;
+            
+            reportText += `📌 الاتصال رقم ${i+1}:\n`;
+            reportText += `   المسار: ${c.path}\n`;
+            reportText += `   الحالة: ${status}\n`;
+            reportText += `   الرابط (URL): ${c.url}\n`;
+            reportText += `   البروتوكول: ${c.protocol}\n`;
+            reportText += `   الإضافات: ${c.extensions}\n`;
+            reportText += `   البيانات المعلقة: ${c.bufferedAmount} بايت\n`;
+            reportText += `   نوع البيانات الثنائية: ${c.binaryType}\n`;
+            reportText += `   onmessage: ${c.onmessage}\n`;
+            reportText += `   onclose: ${c.onclose}\n`;
+            reportText += `   onerror: ${c.onerror}\n`;
+            reportText += `   onopen: ${c.onopen}\n`;
+            
+            // محاولة قراءة خصائص إضافية
+            try {
+                if (c.obj._socket) {
+                    reportText += `   _socket: موجود\n`;
+                }
+                if (c.obj.ws) {
+                    reportText += `   ws: موجود\n`;
+                }
+                // محاولة استخراج أي معرفات
+                if (c.obj.id) {
+                    reportText += `   المعرف (id): ${c.obj.id}\n`;
+                }
+            } catch(e) {}
+            
+            // عرض بعض دوال الاستماع إن وجدت
+            try {
+                if (c.obj.onmessage && typeof c.obj.onmessage === 'function') {
+                    const fnStr = c.obj.onmessage.toString().substring(0, 100);
+                    reportText += `   دالة onmessage (مقتطف): ${fnStr}...\n`;
+                }
+            } catch(e) {}
+            
+            reportText += `\n───────────────────────────────────────\n\n`;
+        });
+    }
+    
+    // ============================================================
+    // 3. معلومات إضافية عن المتغيرات العامة
+    // ============================================================
+    
+    reportText += `═══════════════════════════════════════\n`;
+    reportText += `🔍 المتغيرات العامة التي قد تحتوي على WebSocket:\n\n`;
+    
+    let foundVars = [];
+    for (let key in window) {
+        try {
+            const val = window[key];
+            if (val && typeof val === 'object' && 
+                (key.toLowerCase().includes('socket') || 
+                 key.toLowerCase().includes('ws') ||
+                 key.toLowerCase().includes('connection') ||
+                 key.toLowerCase().includes('chat'))) {
+                foundVars.push(key);
+            }
+        } catch(e) {}
+    }
+    
+    if (foundVars.length > 0) {
+        reportText += foundVars.map(v => `   • ${v}`).join('\n');
+    } else {
+        reportText += `   ❌ لم يتم العثور على متغيرات مشابهة.\n`;
+    }
+    
+    reportText += `\n═══════════════════════════════════════\n`;
+    reportText += `🔌 حالة الاتصال الحالية (navigator.onLine): ${navigator.onLine ? 'متصل' : 'غير متصل'}\n`;
+    reportText += `📡 نوع الاتصال: ${navigator.connection ? navigator.connection.effectiveType : 'غير معروف'}\n`;
+    reportText += `═══════════════════════════════════════\n`;
+    
+    // ============================================================
+    // 4. عرض التقرير في نافذة منبثقة مع مربع نسخ
+    // ============================================================
+    
+    // إنشاء نافذة منبثقة لعرض التقرير
+    const win = window.open('', '_blank', 'width=700,height=600,scrollbars=yes,resizable=yes');
+    if (!win) {
+        alert('❌ تعذر فتح نافذة جديدة. يرجى السماح بالنوافذ المنبثقة لهذا الموقع.');
+        console.log(reportText);
+        return;
+    }
+    
+    win.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <title>تقرير تحليل WebSocket - شات نجد</title>
+            <style>
+                body { font-family: 'Tahoma', Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; margin: 0; }
+                .container { max-width: 800px; margin: 0 auto; background: #16213e; padding: 20px; border-radius: 12px; box-shadow: 0 0 30px rgba(0,0,0,0.8); }
+                h1 { color: #e94560; font-size: 22px; margin-top: 0; text-align: center; }
+                pre { background: #0f0f1a; padding: 15px; border-radius: 8px; overflow: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 13px; line-height: 1.6; color: #a0a0b0; border: 1px solid #2d3436; max-height: 400px; overflow-y: auto; }
+                .copy-btn { display: block; width: 100%; padding: 12px; background: #e94560; color: #fff; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 15px; }
+                .copy-btn:hover { background: #c0392b; }
+                .note { color: #888; font-size: 13px; text-align: center; margin-top: 10px; }
+                .footer { color: #555; font-size: 12px; text-align: center; margin-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>📋 تقرير تحليل اتصال WebSocket</h1>
+                <pre id="reportText">${reportText}</pre>
+                <button class="copy-btn" onclick="copyReport()">📋 نسخ التقرير</button>
+                <div class="note">💡 انسخ هذا التقرير وأرسله للمطور لتحليل المشكلة.</div>
+                <div class="footer">تم إنشاء التقرير بواسطة سكربت التحليل الشامل</div>
+            </div>
+            <script>
+                function copyReport() {
+                    const text = document.getElementById('reportText').innerText;
+                    navigator.clipboard.writeText(text).then(() => {
+                        alert('✅ تم نسخ التقرير بنجاح!');
+                    }).catch(() => {
+                        // طريقة احتياطية
+                        const range = document.createRange();
+                        range.selectNode(document.getElementById('reportText'));
+                        window.getSelection().removeAllRanges();
+                        window.getSelection().addRange(range);
+                        document.execCommand('copy');
+                        alert('✅ تم نسخ التقرير بنجاح!');
+                    });
+                }
+            <\/script>
+        </body>
+        </html>
+    `);
+    win.document.close();
+    
+    console.log('✅ تم إنشاء التقرير بنجاح في نافذة جديدة.');
+    console.log(reportText);
+    
+})();
